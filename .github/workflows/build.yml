@@ -154,6 +154,18 @@ jobs:
             cp -rv scripts "$DIST_DIR/"
           fi
 
+          echo "📦 Baixando e integrando pacote GApps oficial (Play Store e Services)..."
+          mkdir -p "$DIST_DIR/gapps"
+          curl -L -sS -o /tmp/mtg.zip "https://github.com/MustardChef/MindTheGapps-14.0.0-x86_64/releases/download/MindTheGapps-14.0.0-x86_64-20250202_012724/MindTheGapps-14.0.0-x86_64-20250202_012724.zip"
+          unzip -q /tmp/mtg.zip -d /tmp/mtg_unzip
+          cp -v /tmp/mtg_unzip/system/system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk "$DIST_DIR/gapps/"
+          cp -v /tmp/mtg_unzip/system/product/priv-app/GmsCore/GmsCore.apk "$DIST_DIR/gapps/"
+          cp -v /tmp/mtg_unzip/system/product/priv-app/Phonesky/Phonesky.apk "$DIST_DIR/gapps/"
+          cp -v /tmp/mtg_unzip/system/product/app/GoogleContactsSyncAdapter/GoogleContactsSyncAdapter.apk "$DIST_DIR/gapps/"
+          cp -v /tmp/mtg_unzip/system/product/app/GoogleCalendarSyncAdapter/GoogleCalendarSyncAdapter.apk "$DIST_DIR/gapps/"
+          cp -v /tmp/mtg_unzip/system/product/priv-app/GooglePartnerSetup/GooglePartnerSetup.apk "$DIST_DIR/gapps/"
+          rm -rf /tmp/mtg.zip /tmp/mtg_unzip
+
           echo "📜 Criando script de execução rápida do KiteOS..."
           cat << 'EOF' > "$DIST_DIR/run-kiteos.sh"
           #!/usr/bin/env bash
@@ -179,11 +191,19 @@ jobs:
           - **Desenvolvedor:** Miguel
           - **Motto:** Fast • Lightweight • Free
           - **Identidade:** Prisma 3D, Bootanimation 60FPS 1080x1920, Wallpaper Ultra HD
+          - **GApps:** Google Play Store, Google Play Services e GSF inclusos
 
           ## 🚀 Como Executar
           ```bash
           chmod +x run-kiteos.sh
           ./run-kiteos.sh
+          ```
+
+          ## 📲 Como Ativar o GApps
+          Com o emulador rodando, execute:
+          ```bash
+          chmod +x scripts/install-gapps.sh
+          ./scripts/install-gapps.sh
           ```
           EOF
 
