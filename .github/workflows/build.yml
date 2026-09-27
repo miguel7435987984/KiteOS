@@ -210,35 +210,31 @@ jobs:
           ```
           EOF
 
-      - name: 🗜️ Comprimir Imagem da ROM (.zip com compressão máxima)
+      - name: 💿 Preparar Arquivo de Imagem KiteOS-2.0.img
         run: |
           cd "$GITHUB_WORKSPACE/kiteos-release"
-          echo "Compactando distribuição da ROM KiteOS 2.0..."
-          zip -r -9 "$GITHUB_WORKSPACE/KiteOS-2.0-Android14-x86_64-ROM.zip" .
-          echo "Compactando imagem direta system.img do KiteOS 2.0..."
-          zip -9 "$GITHUB_WORKSPACE/KiteOS-2.0-System.img.zip" system.img
+          echo "Gerando o arquivo de imagem oficial KiteOS-2.0.img..."
+          cp -v system.img "$GITHUB_WORKSPACE/KiteOS-2.0.img"
           cd "$GITHUB_WORKSPACE"
-          sha256sum KiteOS-2.0-Android14-x86_64-ROM.zip KiteOS-2.0-System.img.zip > SHA256SUMS.txt
+          sha256sum KiteOS-2.0.img > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          ls -lh KiteOS-2.0-Android14-x86_64-ROM.zip KiteOS-2.0-System.img.zip
+          ls -lh KiteOS-2.0.img
 
-      - name: 🚀 Publicar Imagem .img e ROM no GitHub Actions
+      - name: 🚀 Publicar Arquivo KiteOS-2.0.img no GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: KiteOS-2.0-Android14-x86_64-ROM-Image
+          name: KiteOS-2.0.img
           path: |
-            KiteOS-2.0-Android14-x86_64-ROM.zip
-            KiteOS-2.0-System.img.zip
+            KiteOS-2.0.img
             SHA256SUMS.txt
           retention-days: 14
 
-      - name: 🏷️ Publicar Imagem .img Oficial na Release v2.0
+      - name: 🏷️ Publicar KiteOS-2.0.img na Release Oficial v2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Anexando arquivos de imagem .img diretamente na Release v2.0 do GitHub..."
+          echo "Anexando arquivo KiteOS-2.0.img diretamente na Release v2.0 do GitHub..."
           gh release upload v2.0 \
-            "$GITHUB_WORKSPACE/KiteOS-2.0-Android14-x86_64-ROM.zip#KiteOS 2.0 ROM Bundle (x86_64)" \
-            "$GITHUB_WORKSPACE/KiteOS-2.0-System.img.zip#KiteOS 2.0 System Image (.img)" \
+            "$GITHUB_WORKSPACE/KiteOS-2.0.img#KiteOS 2.0 Imagem de Sistema (.img)" \
             "$GITHUB_WORKSPACE/SHA256SUMS.txt#SHA-256 Checksums" \
             --clobber || echo "Aviso: Release upload falhou ou release não encontrada."
