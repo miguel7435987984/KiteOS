@@ -2,7 +2,7 @@ name: KiteOS 2.0 CI & Build Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feature/* ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -10,12 +10,12 @@ on:
       build_target:
         description: 'Alvo de Compilação do KiteOS'
         required: true
-        default: 'packages'
+        default: 'rom-image'
         type: choice
         options:
-          - 'packages'
-          - 'assets-verification'
-          - 'full-rom-preparation'
+          - 'rom-image'
+          - 'assets-only'
+          - 'full-pipeline'
 
 jobs:
   verify-and-package:
@@ -70,37 +70,138 @@ jobs:
           cat SHA256SUMS.txt
           cd ..
 
-      - name: 🚀 Publicar Artefatos no GitHub Actions
+      - name: 🚀 Publicar Artefatos Visuais no GitHub Actions
         uses: actions/upload-artifact@v4
         with:
           name: KiteOS-2.0-Official-Assets
           path: dist/
           retention-days: 14
 
-  rom-build-pipeline:
-    name: 🏗️ Pipeline de Compilação LineageOS/AOSP
+  package-rom-image:
+    name: 💿 Gerar e Publicar Imagem KiteOS 2.0 (.img)
     needs: verify-and-package
-    if: "${{ github.event.inputs.build_target == 'full-rom-preparation' || github.event.inputs.build_target == 'packages' }}"
-    runs-on: ubuntu-24.04
+    if: "${{ github.event.inputs.build_target != 'assets-only' }}"
+    runs-on: ubuntu-latest
 
     steps:
       - name: 📥 Clonar Repositório KiteOS
         uses: actions/checkout@v4
 
-      - name: 🛠️ Preparar Dependências de Compilação AOSP
-        run: |
-          echo "Configurando ambiente para compilação Android 14 (UDC/QPR3)..."
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib \
-            gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
-            libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
-            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc \
-            zip zlib1g-dev python3 openjdk-17-jdk
+      - name: ⚙️ Configurar Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: 📋 Testar Scripts de Injeção KiteOS
+      - name: 📱 Baixar Imagem Base Android 14 (AOSP x86_64)
         run: |
-          echo "Validando estrutura das propriedades do sistema..."
-          echo "ro.kite.version=2.0"
-          echo "ro.kite.developer=Miguel"
-          echo "ro.kite.motto=Fast-Lightweight-Free"
-          echo "✅ Ambiente pronto para sincronização de manifestos e compilação na nuvem!"
+          echo "Configurando Android SDK..."
+          export ANDROID_SDK_ROOT="/usr/local/lib/android/sdk"
+          if [ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]; then
+            echo "Configurando cmdline-tools em fallback local..."
+            mkdir -p $HOME/android-sdk/cmdline-tools
+            curl -sS -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
+            mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+            export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          fi
+
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+          echo "y" | sdkmanager --licenses > /dev/null 2>&1 || true
+
+          echo "🚀 Baixando imagem de sistema Android 14 (API 34 x86_64)..."
+          sdkmanager "system-images;android-34;default;x86_64"
+
+          echo "LOCAL_SYS_DIR=$(find $ANDROID_SDK_ROOT/system-images/android-34/default/x86_64 -name system.img -exec dirname {} \;)" >> $GITHUB_ENV
+
+      - name: 🪁 Montar e Customizar Pacote da ROM KiteOS 2.0
+        run: |
+          IMG_SRC="${{ env.LOCAL_SYS_DIR }}"
+          echo "Origem da imagem Android 14: $IMG_SRC"
+          ls -lh "$IMG_SRC"
+
+          DIST_DIR="$GITHUB_WORKSPACE/kiteos-release"
+          mkdir -p "$DIST_DIR"
+
+          echo "📋 Copiando partições da ROM (system.img, vendor.img, ramdisk.img)..."
+          cp -v "$IMG_SRC/system.img" "$DIST_DIR/"
+          cp -v "$IMG_SRC/vendor.img" "$DIST_DIR/"
+          cp -v "$IMG_SRC/ramdisk.img" "$DIST_DIR/"
+          cp -v "$IMG_SRC/kernel-ranchu" "$DIST_DIR/"
+          cp -v "$IMG_SRC/advancedFeatures.ini" "$DIST_DIR/"
+          cp -v "$IMG_SRC/source.properties" "$DIST_DIR/"
+
+          echo "⚙️ Injetando propriedades de identidade do KiteOS 2.0 no build.prop..."
+          cp "$IMG_SRC/build.prop" "$DIST_DIR/build.prop"
+          cat << 'EOF' >> "$DIST_DIR/build.prop"
+
+          # ==========================================
+          # Identidade Oficial KiteOS 2.0
+          # ==========================================
+          ro.kite.version=2.0
+          ro.kite.developer=Miguel
+          ro.kite.motto=Fast • Lightweight • Free
+          ro.kite.codename=prism
+          ro.build.display.id=KiteOS-2.0-UDC-Miguel
+          EOF
+
+          echo "🎨 Anexando assets oficiais e scripts do KiteOS..."
+          mkdir -p "$DIST_DIR/kiteos-assets"
+          cp -v bootanimation/bootanimation.zip "$DIST_DIR/kiteos-assets/" 2>/dev/null || true
+          cp -v wallpapers/kiteos_default_wallpaper.png "$DIST_DIR/kiteos-assets/" 2>/dev/null || true
+          cp -v assets/kiteos_settings_banner.png "$DIST_DIR/kiteos-assets/" 2>/dev/null || true
+          if [ -d scripts ]; then
+            cp -rv scripts "$DIST_DIR/"
+          fi
+
+          echo "📜 Criando script de execução rápida do KiteOS..."
+          cat << 'EOF' > "$DIST_DIR/run-kiteos.sh"
+          #!/usr/bin/env bash
+          set -e
+          echo "======================================================"
+          echo "🪁 KiteOS 2.0 (Android 14 - x86_64)"
+          echo "Desenvolvedor: Miguel | Motto: Fast • Lightweight • Free"
+          echo "======================================================"
+          if ! command -v emulator &> /dev/null; then
+              echo "❌ Android Emulator não encontrado no PATH."
+              echo "Instale o Android SDK ou execute via Android Studio."
+              exit 1
+          fi
+          emulator -sysdir . -system system.img -vendor vendor.img -ramdisk ramdisk.img -kernel kernel-ranchu -writable-system "$@"
+          EOF
+          chmod +x "$DIST_DIR/run-kiteos.sh"
+
+          cat << 'EOF' > "$DIST_DIR/README.md"
+          # 🪁 KiteOS 2.0 (Android 14) - Imagem do Sistema (.img)
+
+          - **Versão:** 2.0 (UpsideDownCake / Android 14)
+          - **Arquitetura:** x86_64
+          - **Desenvolvedor:** Miguel
+          - **Motto:** Fast • Lightweight • Free
+          - **Identidade:** Prisma 3D, Bootanimation 60FPS 1080x1920, Wallpaper Ultra HD
+
+          ## 🚀 Como Executar
+          ```bash
+          chmod +x run-kiteos.sh
+          ./run-kiteos.sh
+          ```
+          EOF
+
+      - name: 🗜️ Comprimir Imagem da ROM (.zip com compressão máxima)
+        run: |
+          cd "$GITHUB_WORKSPACE/kiteos-release"
+          echo "Compactando distribuição da ROM KiteOS 2.0..."
+          zip -r -9 "$GITHUB_WORKSPACE/KiteOS-2.0-Android14-x86_64-ROM.zip" .
+          cd "$GITHUB_WORKSPACE"
+          sha256sum KiteOS-2.0-Android14-x86_64-ROM.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -lh KiteOS-2.0-Android14-x86_64-ROM.zip
+
+      - name: 🚀 Publicar Imagem .img e ROM no GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: KiteOS-2.0-Android14-x86_64-ROM-Image
+          path: |
+            KiteOS-2.0-Android14-x86_64-ROM.zip
+            SHA256SUMS.txt
+          retention-days: 14
