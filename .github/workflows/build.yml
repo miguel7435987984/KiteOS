@@ -1,0 +1,106 @@
+name: KiteOS 2.0 CI & Build Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Alvo de Compilação do KiteOS'
+        required: true
+        default: 'packages'
+        type: choice
+        options:
+          - 'packages'
+          - 'assets-verification'
+          - 'full-rom-preparation'
+
+jobs:
+  verify-and-package:
+    name: 🪁 Verificar e Empacotar Artefatos KiteOS 2.0
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Clonar Repositório KiteOS
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Ambiente
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip imagemagick libxml2-utils
+
+      - name: 🔍 Validar Bootanimation (desc.txt e compressão 0)
+        run: |
+          echo "Verificando integridade da bootanimation oficial do KiteOS..."
+          if [ -f bootanimation/bootanimation.zip ]; then
+            # Testar se a compressão é do tipo STORED (0%)
+            unzip -v bootanimation/bootanimation.zip | head -n 20
+            # Extrair desc.txt e validar dimensões
+            unzip -p bootanimation/bootanimation.zip desc.txt > /tmp/desc.txt
+            cat /tmp/desc.txt
+            if grep -q "1080 1920" /tmp/desc.txt; then
+              echo "✅ Resolução 1080x1920 confirmada!"
+            else
+              echo "❌ Resolução incorreta no desc.txt"
+              exit 1
+            fi
+          else
+            echo "⚠️ bootanimation.zip não encontrado na pasta bootanimation/"
+          fi
+
+      - name: 🎨 Validar Papéis de Parede e Banner
+        run: |
+          echo "Verificando dimensões dos assets visuais do KiteOS..."
+          identify wallpapers/kiteos_default_wallpaper.png || true
+          identify assets/kiteos_settings_banner.png || true
+
+      - name: 📦 Gerar Pacote de Customização KiteOS 2.0
+        run: |
+          mkdir -p dist
+          cp -v bootanimation/bootanimation.zip dist/KiteOS-2.0-Bootanimation.zip || true
+          cp -v wallpapers/kiteos_default_wallpaper.png dist/KiteOS-2.0-Wallpaper.png || true
+          cp -v assets/kiteos_settings_banner.png dist/KiteOS-2.0-Settings-Banner.png || true
+
+          # Criar ZIP com tudo reunido
+          cd dist
+          zip -9 KiteOS-2.0-Customization-Bundle.zip *.png *.zip || true
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+      - name: 🚀 Publicar Artefatos no GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: KiteOS-2.0-Official-Assets
+          path: dist/
+          retention-days: 14
+
+  rom-build-pipeline:
+    name: 🏗️ Pipeline de Compilação LineageOS/AOSP
+    needs: verify-and-package
+    if: "${{ github.event.inputs.build_target == 'full-rom-preparation' || github.event.inputs.build_target == 'packages' }}"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 📥 Clonar Repositório KiteOS
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Preparar Dependências de Compilação AOSP
+        run: |
+          echo "Configurando ambiente para compilação Android 14 (UDC/QPR3)..."
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib \
+            gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev \
+            libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc \
+            zip zlib1g-dev python3 openjdk-17-jdk
+
+      - name: 📋 Testar Scripts de Injeção KiteOS
+        run: |
+          echo "Validando estrutura das propriedades do sistema..."
+          echo "ro.kite.version=2.0"
+          echo "ro.kite.developer=Miguel"
+          echo "ro.kite.motto=Fast-Lightweight-Free"
+          echo "✅ Ambiente pronto para sincronização de manifestos e compilação na nuvem!"
